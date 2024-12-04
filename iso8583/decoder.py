@@ -1,4 +1,5 @@
 from typing import Any, Dict, Mapping, Set, Tuple, Type, Union
+import iso8583.specs
 
 __all__ = ["decode", "DecodeError"]
 
@@ -110,6 +111,12 @@ def decode(
     idx = 0
 
     idx = _decode_header(s, doc_dec, doc_enc, idx, spec)
+    headerlength = int(doc_dec["h"], 16)
+    msglength = len(s[idx:])
+
+    if (headerlength != msglength):
+        raise DecodeError(f"Message length indicator {headerlength} not equal to length of message {msglength}", s, doc_dec=doc_dec, doc_enc=doc_enc, pos=0, field="h")
+    
     idx = _decode_type(s, doc_dec, doc_enc, idx, spec)
     idx = _decode_bitmap(s, doc_dec, doc_enc, idx, "p", spec, fields)
 
@@ -129,14 +136,67 @@ def decode(
             continue
         idx = _decode_field(s, doc_dec, doc_enc, idx, field_key, spec[field_key])
 
+        if field_key == '48':
+            privatedecoded, privateencoded = decode_private(doc_enc[field_key]['data'], iso8583.specs.field48private)
+            for key in privatedecoded.keys():
+                if key != "p":
+                    doc_dec[f"48.{key}"] = privatedecoded[key]
+                    doc_enc[f"48.{key}"] = privateencoded[key]
+
+        if field_key == '127':
+            privatedecoded, privateencoded = decode_private(doc_enc[field_key]['data'], iso8583.specs.postilionprivate)
+            for key in privatedecoded.keys():
+                if key != "p":
+                    doc_dec[f"127.{key}"] = privatedecoded[key]
+                    doc_enc[f"127.{key}"] = privateencoded[key]
+
+    if idx != len(s):
+        if idx < 127:
+            raise DecodeError(
+                "Extra data after last field", s, doc_dec, doc_enc, idx, field_key
+            )
+        else:
+            print(f"Field127:[{s[idx:]}]")
+            
+
+    return doc_dec, doc_enc
+
+def decode_private(
+    s: Union[bytes, bytearray], spec: SpecDict
+) -> Tuple[DecodedDict, EncodedDict]:
+    if not isinstance(s, (bytes, bytearray)):
+        raise TypeError(
+            f"Encoded ISO8583 data must be bytes or bytearray, not {s.__class__.__name__}"
+        )
+
+    doc_dec: DecodedDict = {}
+    doc_enc: EncodedDict = {}
+    fields: Set[int] = set()
+    idx = 0
+
+    idx = _decode_bitmap(s, doc_dec, doc_enc, idx, "p", spec, fields)
+
+    # No need to produce secondary bitmap if it's not required
+    if 1 in fields:
+        idx = _decode_bitmap(s, doc_dec, doc_enc, idx, "1", spec, fields)
+
+    # `field_key` can be used to throw an exception after the loop.
+    # So, create it here in case the `fields` set is empty
+    # and never enters the loop to create the variable.
+    # Set `field_key` to the last mandatory one: primary bitmap.
+    field_key = "p"
+
+    for field_key in [str(i) for i in sorted(fields)]:
+        # Secondary bitmap is already decoded
+        if field_key == "1":
+            continue
+        idx = _decode_field(s, doc_dec, doc_enc, idx, field_key, spec[field_key])
+        
     if idx != len(s):
         raise DecodeError(
             "Extra data after last field", s, doc_dec, doc_enc, idx, field_key
         )
-
     return doc_dec, doc_enc
-
-
 #
 # Private interface
 #
@@ -514,7 +574,7 @@ def _decode_field(
             actual_field_len = len(doc_enc[field_key]["data"])
 
         raise DecodeError(
-            f"Field data is {actual_field_len} {len_count}, expecting {enc_field_len}",
+            f"Field {field_key} data is {actual_field_len} {len_count}, expecting {enc_field_len}",
             s,
             doc_dec,
             doc_enc,
