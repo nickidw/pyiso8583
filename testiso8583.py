@@ -9,6 +9,7 @@ try:
         decoded, encoded = iso8583.decode(encoded_raw, spec, field48private, postilionprivate)
         #pprint.pp(encoded)
         pprint.pp(decoded)
+        iso8583.pp(decoded, spec, field127spec=postilionprivate, line_width=120)
 except EOFError:
     exit
 

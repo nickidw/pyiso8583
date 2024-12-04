@@ -14,6 +14,8 @@ def pp(
     desc_width: int = 30,
     stream: Optional[TextIO] = None,
     line_width: int = 80,
+    field48spec : SpecDict = None,
+    field127spec : SpecDict = None
 ) -> None:
     r"""Pretty Print Python dict containing ISO8583 data.
 
@@ -71,9 +73,14 @@ def pp(
         _pp_field(doc, spec, desc_width, stream, line_width, "p")
 
     for field_key in sorted(
-        [k for k in doc.keys() if isinstance(k, str) and k.isnumeric()], key=int
+        [k for k in doc.keys() if isinstance(k, str) and k.replace(".", "").isnumeric()], key=float
     ):
-        _pp_field(doc, spec, desc_width, stream, line_width, field_key)
+        if field_key.startswith("127."):
+            _pp_field(doc, field127spec, desc_width, stream, line_width, field_key)
+        elif field_key.startswith("48."):
+            _pp_field(doc, field48spec, desc_width, stream, line_width, field_key)
+        else:
+            _pp_field(doc, spec, desc_width, stream, line_width, field_key)
 
 
 def _pp_field(
@@ -85,12 +92,12 @@ def _pp_field(
     field_key: str,
 ) -> None:
     indent = 5
-    stream.write("{index:3s}".format(index=str(field_key)))
+    stream.write("{index:6s}".format(index=str(field_key)))
 
     if desc_width > 0:
         stream.write(
             " {desc: <{desc_width}}".format(
-                desc=spec[field_key]["desc"][:desc_width],
+                desc=spec[field_key.replace("127.", "").replace("48.", "")]["desc"][:desc_width],
                 desc_width=desc_width,
             )
         )
