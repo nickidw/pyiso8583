@@ -1,5 +1,4 @@
 from typing import Any, Dict, Mapping, Set, Tuple, Type, Union
-import iso8583.specs
 
 __all__ = ["decode", "DecodeError"]
 
@@ -58,7 +57,7 @@ class DecodeError(ValueError):
 
 
 def decode(
-    s: Union[bytes, bytearray], spec: SpecDict
+    s: Union[bytes, bytearray], spec: SpecDict, field48spec, field127spec
 ) -> Tuple[DecodedDict, EncodedDict]:
     r"""Deserialize a bytes or bytearray instance containing
     ISO8583 data to a Python dict.
@@ -111,12 +110,6 @@ def decode(
     idx = 0
 
     idx = _decode_header(s, doc_dec, doc_enc, idx, spec)
-    headerlength = int(doc_dec["h"], 16)
-    msglength = len(s[idx:])
-
-    if (headerlength != msglength):
-        raise DecodeError(f"Message length indicator {headerlength} not equal to length of message {msglength}", s, doc_dec=doc_dec, doc_enc=doc_enc, pos=0, field="h")
-    
     idx = _decode_type(s, doc_dec, doc_enc, idx, spec)
     idx = _decode_bitmap(s, doc_dec, doc_enc, idx, "p", spec, fields)
 
@@ -137,14 +130,14 @@ def decode(
         idx = _decode_field(s, doc_dec, doc_enc, idx, field_key, spec[field_key])
 
         if field_key == '48':
-            privatedecoded, privateencoded = decode_private(doc_enc[field_key]['data'], iso8583.specs.field48private)
+            privatedecoded, privateencoded = decode_private(doc_enc[field_key]['data'], field48spec)
             for key in privatedecoded.keys():
                 if key != "p":
                     doc_dec[f"48.{key}"] = privatedecoded[key]
                     doc_enc[f"48.{key}"] = privateencoded[key]
 
         if field_key == '127':
-            privatedecoded, privateencoded = decode_private(doc_enc[field_key]['data'], iso8583.specs.postilionprivate)
+            privatedecoded, privateencoded = decode_private(doc_enc[field_key]['data'], field127spec)
             for key in privatedecoded.keys():
                 if key != "p":
                     doc_dec[f"127.{key}"] = privatedecoded[key]
@@ -242,7 +235,20 @@ def _decode_header(
     if spec["h"]["max_len"] <= 0:
         return idx
 
-    return _decode_field(s, doc_dec, doc_enc, idx, "h", spec["h"])
+    
+    index = _decode_field(s, doc_dec, doc_enc, idx, "h", spec["h"])
+
+    if spec["h"]["data_enc"] == "b":
+        headerlength = int(doc_dec["h"], 16)
+    elif spec["h"]["data_enc"] == "ascii":
+        headerlength = int(doc_dec["h"])
+        
+    msglength = len(s[index:])
+
+    if (headerlength != msglength):
+        raise DecodeError(f"Message length indicator {headerlength} not equal to length of message {msglength}", s, doc_dec=doc_dec, doc_enc=doc_enc, pos=0, field="h")
+
+    return index
 
 
 def _decode_type(
